@@ -18,7 +18,6 @@
  */
 import { collectSavedObjects } from './collect_saved_objects';
 import { createObjectsFilter } from './create_objects_filter';
-import { extractErrors } from './extract_errors';
 import { splitOverwrites } from './split_overwrites';
 import {
   SavedObjectsImportError,
@@ -26,6 +25,11 @@ import {
   SavedObjectsResolveImportErrorsOptions,
 } from './types';
 import { validateReferences } from './validate_references';
+import { validateRetries } from './validate_retries';
+import { createSavedObjects } from './create_saved_objects';
+import { getImportIdMapForRetries } from './check_origin_conflicts';
+import { SavedObject } from '../types';
+import { checkConflicts } from './check_conflicts';
 
 /**
  * Resolve and return saved object import errors.
@@ -38,11 +42,17 @@ export async function resolveSavedObjectsImportErrors({
   objectLimit,
   retries,
   savedObjectsClient,
-  supportedTypes,
+  typeRegistry,
   namespace,
+  trueCopy,
 }: SavedObjectsResolveImportErrorsOptions): Promise<SavedObjectsImportResponse> {
+  // throw a BadRequest error if we see invalid retries
+  validateRetries(retries);
+
   let successCount = 0;
   let errorAccumulator: SavedObjectsImportError[] = [];
+  let importIdMap: Map<string, { id: string; omitOriginId?: boolean }> = new Map();
+  const supportedTypes = typeRegistry.getImportableAndExportableTypes().map((type) => type.name);
   const filter = createObjectsFilter(retries);
 
   // Get the objects to resolve errors
@@ -81,40 +91,67 @@ export async function resolveSavedObjectsImportErrors({
   }
 
   // Validate references
-  const { filteredObjects, errors: validationErrors } = await validateReferences(
+  const validateReferencesResult = await validateReferences(
     objectsToResolve,
     savedObjectsClient,
     namespace
   );
-  errorAccumulator = [...errorAccumulator, ...validationErrors];
+  errorAccumulator = [...errorAccumulator, ...validateReferencesResult.errors];
+
+  // Check single-namespace objects for conflicts in this namespace, and check multi-namespace objects for conflicts across all namespaces
+  const checkConflictsOptions = {
+    savedObjectsClient,
+    namespace,
+    ignoreRegularConflicts: true,
+    trueCopy,
+  };
+  const checkConflictsResult = await checkConflicts(
+    validateReferencesResult.filteredObjects,
+    checkConflictsOptions
+  );
+  errorAccumulator = [...errorAccumulator, ...checkConflictsResult.errors];
+  importIdMap = new Map([...importIdMap, ...checkConflictsResult.importIdMap]);
+
+  // Check multi-namespace object types for regular conflicts and ambiguous conflicts
+  const importIdMapForRetries = getImportIdMapForRetries(checkConflictsResult.filteredObjects, {
+    retries,
+    trueCopy,
+  });
+  importIdMap = new Map([...importIdMap, ...importIdMapForRetries]);
 
   // Bulk create in two batches, overwrites and non-overwrites
-  const { objectsToOverwrite, objectsToNotOverwrite } = splitOverwrites(filteredObjects, retries);
-  if (objectsToOverwrite.length) {
-    const bulkCreateResult = await savedObjectsClient.bulkCreate(objectsToOverwrite, {
-      overwrite: true,
-      namespace,
-    });
-    errorAccumulator = [
-      ...errorAccumulator,
-      ...extractErrors(bulkCreateResult.saved_objects, objectsToOverwrite),
+  let successResults: Array<{ type: string; id: string; destinationId?: string }> = [];
+  const accumulatedErrors = [...errorAccumulator];
+  const bulkCreateObjects = async (objects: Array<SavedObject<unknown>>, overwrite?: boolean) => {
+    const options = { savedObjectsClient, importIdMap, namespace, overwrite };
+    const { createdObjects, errors: bulkCreateErrors } = await createSavedObjects(
+      objects,
+      accumulatedErrors,
+      options
+    );
+    errorAccumulator = [...errorAccumulator, ...bulkCreateErrors];
+    successCount += createdObjects.length;
+    successResults = [
+      ...successResults,
+      ...createdObjects.map(({ type, id, destinationId, originId }) => ({
+        type,
+        id,
+        ...(destinationId && { destinationId }),
+        ...(destinationId && !originId && !trueCopy && { trueCopy: true }),
+      })),
     ];
-    successCount += bulkCreateResult.saved_objects.filter((obj) => !obj.error).length;
-  }
-  if (objectsToNotOverwrite.length) {
-    const bulkCreateResult = await savedObjectsClient.bulkCreate(objectsToNotOverwrite, {
-      namespace,
-    });
-    errorAccumulator = [
-      ...errorAccumulator,
-      ...extractErrors(bulkCreateResult.saved_objects, objectsToNotOverwrite),
-    ];
-    successCount += bulkCreateResult.saved_objects.filter((obj) => !obj.error).length;
-  }
+  };
+  const { objectsToOverwrite, objectsToNotOverwrite } = splitOverwrites(
+    checkConflictsResult.filteredObjects,
+    retries
+  );
+  await bulkCreateObjects(objectsToOverwrite, true);
+  await bulkCreateObjects(objectsToNotOverwrite);
 
   return {
     successCount,
     success: errorAccumulator.length === 0,
-    ...(errorAccumulator.length ? { errors: errorAccumulator } : {}),
+    ...(successResults.length && { successResults }),
+    ...(errorAccumulator.length && { errors: errorAccumulator }),
   };
 }

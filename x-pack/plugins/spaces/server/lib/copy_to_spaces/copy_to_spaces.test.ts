@@ -7,10 +7,11 @@ import {
   SavedObjectsImportResponse,
   SavedObjectsImportOptions,
   SavedObjectsExportOptions,
+  SavedObjectsImportSuccess,
 } from 'src/core/server';
 import { copySavedObjectsToSpacesFactory } from './copy_to_spaces';
 import { Readable } from 'stream';
-import { coreMock, savedObjectsTypeRegistryMock, httpServerMock } from 'src/core/server/mocks';
+import { coreMock, httpServerMock } from 'src/core/server/mocks';
 
 jest.mock('../../../../../../src/core/server', () => {
   return {
@@ -53,34 +54,6 @@ describe('copySavedObjectsToSpaces', () => {
   const setup = (setupOpts: SetupOpts) => {
     const coreStart = coreMock.createStart();
 
-    const typeRegistry = savedObjectsTypeRegistryMock.create();
-    typeRegistry.getAllTypes.mockReturnValue([
-      {
-        name: 'dashboard',
-        namespaceType: 'single',
-        hidden: false,
-        mappings: { properties: {} },
-      },
-      {
-        name: 'visualization',
-        namespaceType: 'single',
-        hidden: false,
-        mappings: { properties: {} },
-      },
-      {
-        name: 'globaltype',
-        namespaceType: 'agnostic',
-        hidden: false,
-        mappings: { properties: {} },
-      },
-    ]);
-
-    typeRegistry.isNamespaceAgnostic.mockImplementation((type: string) =>
-      typeRegistry.getAllTypes().some((t) => t.name === type && t.namespaceType === 'agnostic')
-    );
-
-    coreStart.savedObjects.getTypeRegistry.mockReturnValue(typeRegistry);
-
     (exportSavedObjectsToStream as jest.Mock).mockImplementation(
       async (opts: SavedObjectsExportOptions) => {
         return (
@@ -104,6 +77,9 @@ describe('copySavedObjectsToSpaces', () => {
           const response: SavedObjectsImportResponse = {
             success: true,
             successCount: setupOpts.objects.length,
+            successResults: [
+              ('Some success(es) occurred!' as unknown) as SavedObjectsImportSuccess,
+            ],
           };
 
           return Promise.resolve(response);
@@ -156,6 +132,7 @@ describe('copySavedObjectsToSpaces', () => {
           id: 'my-dashboard',
         },
       ],
+      trueCopy: false,
     });
 
     expect(result).toMatchInlineSnapshot(`
@@ -164,11 +141,17 @@ describe('copySavedObjectsToSpaces', () => {
                                                                             "errors": undefined,
                                                                             "success": true,
                                                                             "successCount": 3,
+                                                                            "successResults": Array [
+                                                                              "Some success(es) occurred!",
+                                                                            ],
                                                                           },
                                                                           "destination2": Object {
                                                                             "errors": undefined,
                                                                             "success": true,
                                                                             "successCount": 3,
+                                                                            "successResults": Array [
+                                                                              "Some success(es) occurred!",
+                                                                            ],
                                                                           },
                                                                         }
                                                 `);
@@ -192,6 +175,7 @@ describe('copySavedObjectsToSpaces', () => {
               "bulkCreate": [MockFunction],
               "bulkGet": [MockFunction],
               "bulkUpdate": [MockFunction],
+              "checkConflicts": [MockFunction],
               "create": [MockFunction],
               "delete": [MockFunction],
               "deleteFromNamespaces": [MockFunction],
@@ -258,6 +242,7 @@ describe('copySavedObjectsToSpaces', () => {
               "bulkCreate": [MockFunction],
               "bulkGet": [MockFunction],
               "bulkUpdate": [MockFunction],
+              "checkConflicts": [MockFunction],
               "create": [MockFunction],
               "delete": [MockFunction],
               "deleteFromNamespaces": [MockFunction],
@@ -266,10 +251,19 @@ describe('copySavedObjectsToSpaces', () => {
               "get": [MockFunction],
               "update": [MockFunction],
             },
-            "supportedTypes": Array [
-              "dashboard",
-              "visualization",
-            ],
+            "trueCopy": false,
+            "typeRegistry": Object {
+              "getAllTypes": [MockFunction],
+              "getImportableAndExportableTypes": [MockFunction],
+              "getIndex": [MockFunction],
+              "getType": [MockFunction],
+              "isHidden": [MockFunction],
+              "isImportableAndExportable": [MockFunction],
+              "isMultiNamespace": [MockFunction],
+              "isNamespaceAgnostic": [MockFunction],
+              "isSingleNamespace": [MockFunction],
+              "registerType": [MockFunction],
+            },
           },
         ],
         Array [
@@ -323,6 +317,7 @@ describe('copySavedObjectsToSpaces', () => {
               "bulkCreate": [MockFunction],
               "bulkGet": [MockFunction],
               "bulkUpdate": [MockFunction],
+              "checkConflicts": [MockFunction],
               "create": [MockFunction],
               "delete": [MockFunction],
               "deleteFromNamespaces": [MockFunction],
@@ -331,10 +326,19 @@ describe('copySavedObjectsToSpaces', () => {
               "get": [MockFunction],
               "update": [MockFunction],
             },
-            "supportedTypes": Array [
-              "dashboard",
-              "visualization",
-            ],
+            "trueCopy": false,
+            "typeRegistry": Object {
+              "getAllTypes": [MockFunction],
+              "getImportableAndExportableTypes": [MockFunction],
+              "getIndex": [MockFunction],
+              "getType": [MockFunction],
+              "isHidden": [MockFunction],
+              "isImportableAndExportable": [MockFunction],
+              "isMultiNamespace": [MockFunction],
+              "isNamespaceAgnostic": [MockFunction],
+              "isSingleNamespace": [MockFunction],
+              "registerType": [MockFunction],
+            },
           },
         ],
       ]
@@ -370,6 +374,7 @@ describe('copySavedObjectsToSpaces', () => {
         return Promise.resolve({
           success: true,
           successCount: 3,
+          successResults: [('Some success(es) occurred!' as unknown) as SavedObjectsImportSuccess],
         });
       },
     });
@@ -394,6 +399,7 @@ describe('copySavedObjectsToSpaces', () => {
             id: 'my-dashboard',
           },
         ],
+        trueCopy: false,
       }
     );
 
@@ -410,11 +416,17 @@ describe('copySavedObjectsToSpaces', () => {
                             "errors": undefined,
                             "success": true,
                             "successCount": 3,
+                            "successResults": Array [
+                              "Some success(es) occurred!",
+                            ],
                           },
                           "non-existent-space": Object {
                             "errors": undefined,
                             "success": true,
                             "successCount": 3,
+                            "successResults": Array [
+                              "Some success(es) occurred!",
+                            ],
                           },
                         }
                 `);
@@ -472,6 +484,7 @@ describe('copySavedObjectsToSpaces', () => {
               id: 'my-dashboard',
             },
           ],
+          trueCopy: false,
         }
       )
     ).rejects.toThrowErrorMatchingInlineSnapshot(

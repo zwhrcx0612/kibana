@@ -45,32 +45,39 @@ export const registerImportRoute = (router: IRouter, config: SavedObjectConfig) 
         },
       },
       validate: {
-        query: schema.object({
-          overwrite: schema.boolean({ defaultValue: false }),
-        }),
+        query: schema.object(
+          {
+            overwrite: schema.boolean({ defaultValue: false }),
+            trueCopy: schema.boolean({ defaultValue: false }),
+          },
+          {
+            validate: (object) => {
+              if (object.overwrite && object.trueCopy) {
+                return 'cannot use [overwrite] with [trueCopy]';
+              }
+            },
+          }
+        ),
         body: schema.object({
           file: schema.stream(),
         }),
       },
     },
     router.handleLegacyErrors(async (context, req, res) => {
-      const { overwrite } = req.query;
+      const { overwrite, trueCopy } = req.query;
       const file = req.body.file as FileStream;
       const fileExtension = extname(file.hapi.filename).toLowerCase();
       if (fileExtension !== '.ndjson') {
         return res.badRequest({ body: `Invalid file extension ${fileExtension}` });
       }
 
-      const supportedTypes = context.core.savedObjects.typeRegistry
-        .getImportableAndExportableTypes()
-        .map((type) => type.name);
-
       const result = await importSavedObjectsFromStream({
-        supportedTypes,
         savedObjectsClient: context.core.savedObjects.client,
+        typeRegistry: context.core.savedObjects.typeRegistry,
         readStream: createSavedObjectsStreamFromNdJson(file),
         objectLimit: maxImportExportSize,
         overwrite,
+        trueCopy,
       });
 
       return res.ok({ body: result });
