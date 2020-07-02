@@ -13,6 +13,10 @@ import {
 import { i18n } from '@kbn/i18n';
 import { DEFAULT_APP_CATEGORIES } from '../../../../src/core/public';
 import { DataPublicPluginSetup, DataPublicPluginStart } from '../../../../src/plugins/data/public';
+import {
+  HomePublicPluginSetup,
+  FeatureCatalogueCategory,
+} from '../../../../src/plugins/home/public';
 import { LicensingPluginSetup } from '../../licensing/public';
 import { PLUGIN_ID, CheckPermissionsResponse, PostIngestSetupResponse } from '../common';
 
@@ -38,6 +42,7 @@ export interface IngestManagerStart {
 export interface IngestManagerSetupDeps {
   licensing: LicensingPluginSetup;
   data: DataPublicPluginSetup;
+  home: HomePublicPluginSetup;
 }
 
 export interface IngestManagerStartDeps {
@@ -75,6 +80,22 @@ export class IngestManagerPlugin
           teardownIngestManager(coreStart);
         };
       },
+    });
+
+    deps.home.featureCatalogue.register({
+      // TODO: Should the plugin ID be snake case, i.e '/app/ingest_manager'? That seems to be the url naming convention for the other apps,
+      // and the feature catalogue doesn't work with ID as 'ingestManager'
+      id: 'ingest_manager',
+      title: i18n.translate('xpack.ingestManager.featureCatalogueTitle', {
+        defaultMessage: 'Manage ingest',
+      }),
+      description: i18n.translate('xpack.ingestManager.featureCatalogueTitle', {
+        defaultMessage: 'Management for Elastic Agents and integrations.',
+      }),
+      icon: 'logstashInput',
+      path: '/app/ingestManager',
+      showOnHomePage: true,
+      category: FeatureCatalogueCategory.ADMIN, // TODO: is the correct category for this plugin?
     });
 
     return {};
